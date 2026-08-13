@@ -42,7 +42,7 @@ if not MP_AVAILABLE and not CVZONE_AVAILABLE:
 # ==============================================================================
 MODEL_PATH       = "hand_landmarker.task"
 IMAGE_PATH       = "testimage.jpg"      # ← change to your image filename
-CAMERA_INDEX     = 1   # 0 = built-in Mac webcam | 1 = iPhone (Continuity Camera)
+CAMERA_INDEX     = 0   # 0 = built-in Mac webcam | 1 = iPhone (Continuity Camera)
 
 # Camera orientation — tweak these when using iPhone
 FLIP_CAMERA      = False  # True  = mirror horizontally (built-in webcam default)
