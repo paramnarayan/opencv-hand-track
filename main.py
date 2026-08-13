@@ -42,22 +42,26 @@ if not MP_AVAILABLE and not CVZONE_AVAILABLE:
 # ==============================================================================
 MODEL_PATH       = "hand_landmarker.task"
 IMAGE_PATH       = "testimage.jpg"      # ← change to your image filename
-CAMERA_INDEX     = 0   # 0 = built-in Mac webcam | 1 = iPhone (Continuity Camera)
+CAMERA_INDEX     = 1   # 0 = built-in Mac webcam | 1 = iPhone (Continuity Camera)
 
 # Camera orientation — tweak these when using iPhone
-FLIP_CAMERA      = True  # True  = mirror horizontally (built-in webcam default)
+FLIP_CAMERA      = False  # True  = mirror horizontally (built-in webcam default)
                            # False = no flip (iPhone Continuity Camera)
 ROTATE_FRAME     = None   # None = no rotation
                            # cv2.ROTATE_90_CLOCKWISE        — if frame appears sideways
                            # cv2.ROTATE_90_COUNTERCLOCKWISE — if frame appears sideways other way
 
 MIN_GAP          = 80      # px — minimum hand spread to show image
-EMA_ALPHA        = 0.15    # smoothing: lower = smoother, higher = more responsive
-DEADZONE_PX      = 2.0     # ignore movements smaller than this px (kills micro-jitter)
+
+# One Euro Filter — adaptive low-latency smoother
+# min_cutoff: Hz — smoothing when hands are still  (lower = smoother, but laggier)
+# beta:        — responsiveness when moving fast    (higher = less delay when moving)
+OEF_MIN_CUTOFF  = 2.0    # try range 1.0–3.0
+OEF_BETA        = 0.5    # try range 0.1–1.0 (0.5 = very responsive)
 
 # Fixed image display size (fraction of the smaller webcam dimension).
 # Image is ALWAYS centered on screen — hands reveal/hide it like a window.
-IMG_DISPLAY_FRAC = 0.50
+IMG_DISPLAY_FRAC = 0.35
 
 # Orange tint
 ORANGE_STRENGTH  = 0.22              # 0.0 = no tint, 1.0 = solid orange
@@ -79,30 +83,59 @@ def apply_frame_transform(frame):
 
 
 # ==============================================================================
-# DEMA Smoother — low-lag, low-jitter
+# One Euro Filter — adaptive, low-latency, low-jitter landmark smoother
 # ==============================================================================
-class DEMASmoother:
-    def __init__(self, alpha=EMA_ALPHA, deadzone=DEADZONE_PX):
-        self.alpha    = alpha
-        self.deadzone = deadzone
-        self.ema1 = self.ema2 = self._last = None
+class OneEuroFilter:
+    """
+    Adapts its cutoff frequency to motion speed:
+    - Slow movement / stationary → low cutoff (smooth, jitter-free)
+    - Fast movement             → high cutoff (near-zero lag)
+    Reference: Casiez et al. CHI 2012
+    """
+    def __init__(self, min_cutoff=OEF_MIN_CUTOFF, beta=OEF_BETA, d_cutoff=1.0):
+        self.min_cutoff = min_cutoff
+        self.beta       = beta
+        self.d_cutoff   = d_cutoff
+        self._x    = None   # filtered position
+        self._dx   = None   # filtered derivative
+        self._t    = None   # last timestamp
 
-    def smooth(self, pts):
-        if self.ema1 is None:
-            self.ema1 = self.ema2 = self._last = pts.copy()
+    @staticmethod
+    def _alpha(cutoff, dt):
+        """Low-pass filter coefficient from cutoff (Hz) and timestep (s)."""
+        tau = 1.0 / (2.0 * math.pi * cutoff)
+        return 1.0 / (1.0 + tau / dt)
+
+    def smooth(self, pts, t=None):
+        """pts: np.float32 array of any shape. t: current timestamp (seconds)."""
+        if t is None:
+            t = time.time()
+
+        if self._x is None:
+            self._x  = pts.copy().astype(np.float64)
+            self._dx = np.zeros_like(self._x)
+            self._t  = t
             return pts.copy()
-        a = self.alpha
-        self.ema1 = a * pts       + (1.0 - a) * self.ema1
-        self.ema2 = a * self.ema1 + (1.0 - a) * self.ema2
-        dema = 2.0 * self.ema1 - self.ema2
 
-        if np.max(np.abs(dema - self._last)) < self.deadzone:
-            return self._last.copy()
-        self._last = dema.copy()
-        return dema
+        dt = max(t - self._t, 1e-6)   # guard against zero-dt
+
+        # ─ Derivative (speed) ─────────────────────────────────────────────
+        a_d       = self._alpha(self.d_cutoff, dt)
+        dx_raw    = (pts.astype(np.float64) - self._x) / dt
+        self._dx  = a_d * dx_raw + (1.0 - a_d) * self._dx
+
+        # ─ Adaptive cutoff ──────────────────────────────────────────────
+        speed     = float(np.mean(np.abs(self._dx)))  # scalar speed estimate
+        cutoff    = self.min_cutoff + self.beta * speed
+
+        # ─ Filter position ───────────────────────────────────────────────
+        a         = self._alpha(cutoff, dt)
+        self._x   = a * pts.astype(np.float64) + (1.0 - a) * self._x
+        self._t   = t
+        return self._x.astype(np.float32)
 
     def reset(self):
-        self.ema1 = self.ema2 = self._last = None
+        self._x = self._dx = self._t = None
 
 
 # ==============================================================================
@@ -326,6 +359,7 @@ def main():
         print(f"[ERROR] Cannot open camera {CAMERA_INDEX}.")
         return
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)   # always grab latest frame
+    cap.set(cv2.CAP_PROP_FPS, 60)         # request 60 FPS for lower latency
 
     # — Read one frame to get frame dimensions (needed for Projector init)
     ok, probe = cap.read()
@@ -369,7 +403,7 @@ def main():
             print("[ERROR] No hand detector available.")
             return
 
-    smoother = DEMASmoother(alpha=EMA_ALPHA, deadzone=DEADZONE_PX)
+    smoother = OneEuroFilter(min_cutoff=OEF_MIN_CUTOFF, beta=OEF_BETA)
     win_name = "Hand Projection"
 
     # FPS counter
@@ -434,8 +468,9 @@ def main():
                                  right_idx[1] - left_idx[1])
 
                 if gap > MIN_GAP:
+                    t_now   = time.time()
                     raw_dst = np.float32([left_idx, right_idx, right_thm, left_thm])
-                    dst_pts = smoother.smooth(raw_dst)
+                    dst_pts = smoother.smooth(raw_dst, t=t_now)
                     frame   = proj.render_correct(frame, dst_pts)
                 else:
                     smoother.reset()
