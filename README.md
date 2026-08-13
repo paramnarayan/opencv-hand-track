@@ -1,134 +1,156 @@
-# 🖐️ Hand Tracking Image Reveal
+# Hand Tracking Image Reveal
 
-A real-time hand-tracking demo using **MediaPipe** and **OpenCV** that lets you reveal a fixed image by forming a frame with your two hands. The image is pinned at the center of the screen — your hands act as a reveal window, uncovering the image as you move them over it.
+A real-time MediaPipe and OpenCV demo that reveals a fixed image through a
+window formed by two hands. The image remains centered while the index fingers
+and thumbs control the reveal area.
 
----
+## Features
 
-## ✨ How It Works
+- MediaPipe Hand Landmarker with an optional CVZone fallback
+- One Euro Filter smoothing using a monotonic clock
+- Convex-area validation to reject collapsed or crossed hand shapes
+- Feathered image reveal and configurable orange tint
+- Reused render buffers to reduce per-frame memory allocation
+- Command-line configuration without editing source code
+- Automatic cleanup of cameras, windows, and detector resources
 
-1. Hold both hands up in front of your webcam
-2. Form a box/frame shape using your **index fingers** and **thumbs**
-3. The area between your hands acts as a **transparent window** that reveals the image beneath
-4. The image stays locked at the center of the screen — only your hands move
+## Requirements
 
----
+- Python 3.10 or newer
+- A webcam
+- The bundled `hand_landmarker.task` model, or another compatible model
 
-## 📋 Requirements
+## Installation
 
-- Python 3.10+
-- A webcam (or iPhone via Continuity Camera on macOS)
-- The `hand_landmarker.task` model file (MediaPipe)
-
-### Install dependencies
+Create and activate a virtual environment:
 
 ```bash
-pip install opencv-python numpy mediapipe
+python -m venv .venv
 ```
 
-> **Optional:** Install `cvzone` as a fallback detector:
-> ```bash
-> pip install cvzone
-> ```
+Windows PowerShell:
 
----
-
-## 🚀 Quick Start
-
-1. **Clone the repo**
-   ```bash
-   git clone https://github.com/paramnarayan/opencv-hand-track.git
-   cd opencv-hand-track
-   ```
-
-2. **Add your image**  
-   Drop any `.jpg`, `.jpeg`, `.png`, or `.webp` image into the project folder and update `IMAGE_PATH` in `main.py`:
-   ```python
-   IMAGE_PATH = "your_photo.jpg"
-   ```
-   If no image is set, the script auto-detects the first image it finds in the folder.
-
-3. **Download the MediaPipe model**  
-   Download `hand_landmarker.task` from [MediaPipe Models](https://developers.google.com/mediapipe/solutions/vision/hand_landmarker#models) and place it in the project root.
-
-4. **Run**
-   ```bash
-   python3 main.py
-   ```
-
-Press **Q** or **ESC** to quit.
-
----
-
-## ⚙️ Configuration
-
-All settings are at the top of `main.py`:
-
-| Variable | Default | Description |
-|---|---|---|
-| `IMAGE_PATH` | `"testimage.jpg"` | Path to the image to reveal |
-| `MODEL_PATH` | `"hand_landmarker.task"` | Path to MediaPipe model |
-| `CAMERA_INDEX` | `0` | Camera to use (`0` = built-in, `1` = iPhone) |
-| `FLIP_CAMERA` | `True` | Mirror the frame horizontally (set `False` for iPhone) |
-| `ROTATE_FRAME` | `None` | Rotate frame if sideways (see iPhone section) |
-| `IMG_DISPLAY_FRAC` | `0.35` | Image size as fraction of the smaller screen dimension |
-| `MIN_GAP` | `80` | Minimum hand spread (px) before image appears |
-| `OEF_MIN_CUTOFF` | `2.0` | Smoothing when hands are still — lower = smoother, slightly laggier |
-| `OEF_BETA` | `0.5` | Responsiveness when moving fast — higher = less lag |
-| `ORANGE_STRENGTH` | `0.22` | Orange tint intensity inside the hand quad |
-| `FEATHER_RADIUS` | `5` | Soft edge feathering radius (px) |
-
----
-
-## 📱 Using an iPhone as Camera (macOS only)
-
-macOS **Continuity Camera** lets you use your iPhone as a high-quality webcam wirelessly.
-
-**Requirements:**
-- iPhone on iOS 16+
-- Mac on macOS Ventura (13)+
-- Same Apple ID signed in on both devices
-- Wi-Fi and Bluetooth enabled on both
-
-**Setup:**
-1. Bring your iPhone near your Mac — it appears automatically
-2. In `main.py`, set:
-   ```python
-   CAMERA_INDEX = 1      # iPhone is usually index 1
-   FLIP_CAMERA  = False  # iPhone feed is already correctly oriented
-   ```
-3. If the image appears sideways, add:
-   ```python
-   ROTATE_FRAME = cv2.ROTATE_90_CLOCKWISE
-   # or
-   ROTATE_FRAME = cv2.ROTATE_90_COUNTERCLOCKWISE
-   ```
-
-Run the script once to see all detected cameras listed in the startup log.
-
----
-
-## 🧠 Technical Details
-
-- **Detector:** MediaPipe `HandLandmarker` (high-precision task API, VIDEO mode). Falls back to `cvzone` if the `.task` model is missing.
-- **Smoothing:** [One Euro Filter](https://cristal.univ-lille.fr/~casiez/1euro/) (Casiez et al. CHI 2012) — adapts its cutoff frequency to motion speed. Near-zero lag when moving fast; jitter-free when still. Tuned via `OEF_MIN_CUTOFF` and `OEF_BETA`.
-- **Rendering:** Two-layer compositing — orange tint inside the hand quad, then the fixed image composited through a feathered reveal mask. All buffers are pre-allocated at startup for zero per-frame heap allocation.
-- **Image position:** Computed once from frame dimensions at startup. The image never moves or scales during runtime.
-- **Camera:** Requests 60 FPS from the capture device for minimum latency.
-
----
-
-## 📁 Project Structure
-
+```powershell
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -e .
 ```
+
+macOS or Linux:
+
+```bash
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e .
+```
+
+Install the optional CVZone fallback with:
+
+```bash
+python -m pip install -e ".[fallback]"
+```
+
+## Running
+
+The original entry point remains supported:
+
+```bash
+python main.py
+```
+
+After an editable installation, either of these also works:
+
+```bash
+hand-reveal
+python -m hand_reveal
+```
+
+Press `Q` or `ESC` to quit.
+
+## Camera discovery
+
+Camera scanning is opt-in so startup does not open every camera automatically:
+
+```bash
+python main.py --list-cameras
+python main.py --camera 1
+```
+
+## Common options
+
+```text
+--image PATH              Image to reveal
+--model PATH              MediaPipe task model
+--camera INDEX            Camera index
+--flip-camera             Mirror the camera horizontally
+--no-flip-camera          Disable mirroring (default)
+--rotate {none,cw,ccw,180}
+--min-gap PIXELS          Minimum index-finger separation
+--min-area PIXELS         Minimum valid reveal polygon area
+--image-size FRACTION     Display size relative to the camera frame
+--orange-strength VALUE   Tint strength from 0 to 1
+--feather-radius PIXELS   Reveal-edge softness; 0 disables it
+--min-cutoff VALUE        One Euro Filter stationary smoothing
+--beta VALUE              One Euro Filter motion responsiveness
+--fps VALUE               Requested camera frame rate
+```
+
+Run `python main.py --help` for the complete list.
+
+### Examples
+
+Use an iPhone Continuity Camera commonly exposed as camera 1:
+
+```bash
+python main.py --camera 1 --no-flip-camera
+```
+
+Mirror a built-in webcam and use a custom image:
+
+```bash
+python main.py --flip-camera --image path/to/photo.jpg
+```
+
+Rotate a sideways camera feed:
+
+```bash
+python main.py --rotate cw
+```
+
+Image and model paths are resolved independently of the terminal's working
+directory. If the requested image cannot be read, the application searches the
+same directory for another supported image and finally generates a placeholder.
+
+## Project structure
+
+```text
 opencv-hand-track/
-├── main.py                # Main application
-├── hand_landmarker.task   # MediaPipe hand model (download separately)
-├── testimage.jpg          # Demo image (replace with your own)
-└── README.md
+├── main.py
+├── pyproject.toml
+├── hand_landmarker.task
+├── testimage.jpg
+└── src/hand_reveal/
+    ├── app.py
+    ├── cli.py
+    ├── config.py
+    ├── detector.py
+    ├── filters.py
+    ├── geometry.py
+    └── renderer.py
 ```
 
----
+GitHub Actions verifies packaging, compilation, imports, and all three command
+entry points on supported Python versions. Hardware-dependent camera execution
+is intentionally not run in CI.
 
-## 📄 License
+## Troubleshooting
 
-MIT
+- Use `--list-cameras` if the default camera cannot be opened.
+- Try `--flip-camera` if hand movement feels reversed.
+- Increase `--min-area` if accidental narrow shapes reveal the image.
+- Reduce `--feather-radius` or `--image-size` on slower hardware.
+- Verify that the model path points to a readable Hand Landmarker task file.
+
+## License
+
+MIT. See `LICENSE`.

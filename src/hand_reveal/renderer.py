@@ -1,0 +1,177 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import cv2
+import numpy as np
+
+
+SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+ORANGE_BGR = (10, 110, 255)
+
+
+def load_overlay(image_path: Path, search_directory: Path) -> np.ndarray:
+    candidates = [image_path]
+    if not image_path.is_file() and search_directory.is_dir():
+        candidates.extend(
+            path
+            for path in sorted(search_directory.iterdir())
+            if path.is_file()
+            and path.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS
+            and not path.name.startswith(".")
+        )
+
+    seen: set[Path] = set()
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if resolved in seen or not candidate.is_file():
+            continue
+        seen.add(resolved)
+        image = cv2.imread(str(candidate))
+        if image is not None and image.size:
+            print(
+                f"[INFO] Loaded image: {candidate} "
+                f"({image.shape[1]}x{image.shape[0]} px)"
+            )
+            return image
+
+    print("[WARNING] No readable image found; using a generated placeholder.")
+    card = np.full((1080, 1920, 3), (20, 20, 20), dtype=np.uint8)
+    cv2.rectangle(card, (20, 20), (1900, 1060), (0, 180, 255), 8)
+    cv2.putText(
+        card,
+        "PUT YOUR IMAGE IN THIS FOLDER",
+        (380, 560),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        2.2,
+        (255, 255, 255),
+        5,
+        cv2.LINE_AA,
+    )
+    return card
+
+
+class Projector:
+    """Composites a fixed image through a hand-controlled reveal mask."""
+
+    def __init__(
+        self,
+        overlay: np.ndarray,
+        frame_width: int,
+        frame_height: int,
+        image_display_fraction: float,
+        orange_strength: float,
+        feather_radius: int,
+    ):
+        if not 0 < image_display_fraction <= 1:
+            raise ValueError("Image display fraction must be between 0 and 1")
+        if not 0 <= orange_strength <= 1:
+            raise ValueError("Orange strength must be between 0 and 1")
+        if feather_radius < 0:
+            raise ValueError("Feather radius cannot be negative")
+
+        self.frame_width = frame_width
+        self.frame_height = frame_height
+        self.orange_strength = orange_strength
+
+        overlay_height, overlay_width = overlay.shape[:2]
+        base = max(1, int(min(frame_width, frame_height) * image_display_fraction))
+        if overlay_width >= overlay_height:
+            display_width = base
+            display_height = max(1, int(base * overlay_height / overlay_width))
+        else:
+            display_height = base
+            display_width = max(1, int(base * overlay_width / overlay_height))
+
+        resized = cv2.resize(
+            overlay, (display_width, display_height), interpolation=cv2.INTER_AREA
+        )
+        center_x, center_y = frame_width // 2, frame_height // 2
+        image_x0 = center_x - display_width // 2
+        image_y0 = center_y - display_height // 2
+        image_x1 = image_x0 + display_width
+        image_y1 = image_y0 + display_height
+
+        self.canvas_fixed = np.zeros((frame_height, frame_width, 3), dtype=np.uint8)
+        self.image_mask = np.zeros((frame_height, frame_width), dtype=np.uint8)
+
+        source_x0 = max(0, -image_x0)
+        source_y0 = max(0, -image_y0)
+        source_x1 = min(display_width, frame_width - image_x0)
+        source_y1 = min(display_height, frame_height - image_y0)
+        dest_x0 = max(0, image_x0)
+        dest_y0 = max(0, image_y0)
+        dest_x1 = min(frame_width, image_x1)
+        dest_y1 = min(frame_height, image_y1)
+        if source_x1 > source_x0 and source_y1 > source_y0:
+            self.canvas_fixed[dest_y0:dest_y1, dest_x0:dest_x1] = resized[
+                source_y0:source_y1, source_x0:source_x1
+            ]
+            self.image_mask[dest_y0:dest_y1, dest_x0:dest_x1] = 255
+
+        shape = (frame_height, frame_width)
+        color_shape = (frame_height, frame_width, 3)
+        self.quad_mask = np.zeros(shape, dtype=np.uint8)
+        self.reveal_mask = np.zeros(shape, dtype=np.uint8)
+        self.image_weight = np.zeros(shape, dtype=np.float32)
+        self.camera_weight = np.ones(shape, dtype=np.float32)
+        self.orange_solid = np.full(color_shape, ORANGE_BGR, dtype=np.uint8)
+        self.orange_blended = np.zeros(color_shape, dtype=np.uint8)
+        self.tinted_frame = np.zeros(color_shape, dtype=np.uint8)
+        self.result = np.zeros(color_shape, dtype=np.uint8)
+
+        self.feather_radius = feather_radius
+        if feather_radius:
+            self.erode_kernel = cv2.getStructuringElement(
+                cv2.MORPH_ELLIPSE, (feather_radius, feather_radius)
+            )
+            self.blur_size = feather_radius * 2 + 1
+            self.blur_sigma = feather_radius * 0.5
+
+        print(f"[INFO] Projector ready: display size {display_width}x{display_height} px")
+
+    def render(self, frame: np.ndarray, quad: np.ndarray) -> np.ndarray:
+        self.quad_mask.fill(0)
+        cv2.fillConvexPoly(self.quad_mask, quad.astype(np.int32), 255)
+        cv2.bitwise_and(self.quad_mask, self.image_mask, dst=self.reveal_mask)
+
+        if self.feather_radius:
+            cv2.erode(
+                self.reveal_mask,
+                self.erode_kernel,
+                dst=self.reveal_mask,
+                iterations=1,
+            )
+            cv2.GaussianBlur(
+                self.reveal_mask,
+                (self.blur_size, self.blur_size),
+                self.blur_sigma,
+                dst=self.reveal_mask,
+            )
+
+        cv2.addWeighted(
+            frame,
+            1.0 - self.orange_strength,
+            self.orange_solid,
+            self.orange_strength,
+            0,
+            dst=self.orange_blended,
+        )
+        np.copyto(self.tinted_frame, frame)
+        cv2.copyTo(self.orange_blended, self.quad_mask, self.tinted_frame)
+
+        cv2.multiply(
+            self.reveal_mask,
+            1.0 / 255.0,
+            dst=self.image_weight,
+            dtype=cv2.CV_32F,
+        )
+        np.subtract(1.0, self.image_weight, out=self.camera_weight)
+        cv2.blendLinear(
+            self.canvas_fixed,
+            self.tinted_frame,
+            self.image_weight,
+            self.camera_weight,
+            dst=self.result,
+        )
+        return self.result
