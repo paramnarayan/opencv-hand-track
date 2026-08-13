@@ -70,10 +70,10 @@ All settings are at the top of `main.py`:
 | `CAMERA_INDEX` | `0` | Camera to use (`0` = built-in, `1` = iPhone) |
 | `FLIP_CAMERA` | `True` | Mirror the frame horizontally (set `False` for iPhone) |
 | `ROTATE_FRAME` | `None` | Rotate frame if sideways (see iPhone section) |
-| `IMG_DISPLAY_FRAC` | `0.50` | Image size as fraction of screen (0.5 = 50%) |
+| `IMG_DISPLAY_FRAC` | `0.35` | Image size as fraction of the smaller screen dimension |
 | `MIN_GAP` | `80` | Minimum hand spread (px) before image appears |
-| `EMA_ALPHA` | `0.15` | Smoothing strength (lower = smoother) |
-| `DEADZONE_PX` | `2.0` | Ignore jitter smaller than this (px) |
+| `OEF_MIN_CUTOFF` | `2.0` | Smoothing when hands are still — lower = smoother, slightly laggier |
+| `OEF_BETA` | `0.5` | Responsiveness when moving fast — higher = less lag |
 | `ORANGE_STRENGTH` | `0.22` | Orange tint intensity inside the hand quad |
 | `FEATHER_RADIUS` | `5` | Soft edge feathering radius (px) |
 
@@ -110,9 +110,10 @@ Run the script once to see all detected cameras listed in the startup log.
 ## 🧠 Technical Details
 
 - **Detector:** MediaPipe `HandLandmarker` (high-precision task API, VIDEO mode). Falls back to `cvzone` if the `.task` model is missing.
-- **Smoothing:** DEMA (Double Exponential Moving Average) with a deadzone to eliminate micro-jitter without adding lag.
+- **Smoothing:** [One Euro Filter](https://cristal.univ-lille.fr/~casiez/1euro/) (Casiez et al. CHI 2012) — adapts its cutoff frequency to motion speed. Near-zero lag when moving fast; jitter-free when still. Tuned via `OEF_MIN_CUTOFF` and `OEF_BETA`.
 - **Rendering:** Two-layer compositing — orange tint inside the hand quad, then the fixed image composited through a feathered reveal mask. All buffers are pre-allocated at startup for zero per-frame heap allocation.
 - **Image position:** Computed once from frame dimensions at startup. The image never moves or scales during runtime.
+- **Camera:** Requests 60 FPS from the capture device for minimum latency.
 
 ---
 
