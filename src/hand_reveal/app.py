@@ -23,9 +23,20 @@ def transform_frame(frame, config: AppConfig):
     rotation = ROTATIONS[config.rotation]
     if rotation is not None:
         frame = cv2.rotate(frame, rotation)
-    # This camera backend supplies mirrored frames. Flip once so the displayed
-    # view has normal, non-mirrored orientation.
-    return cv2.flip(frame, 1)
+    correct_mirror = config.mirror_mode == "on" or (
+        config.mirror_mode == "auto" and config.camera_index == 0
+    )
+    if correct_mirror:
+        frame = cv2.flip(frame, 1)
+    return frame
+
+
+def _capture_resolution(config: AppConfig) -> tuple[int, int]:
+    """Use a sharper profile while allowing explicit camera overrides."""
+    profile = (1920, 1080) if config.camera_index == 1 else (1280, 720)
+    width = config.capture_width or profile[0]
+    height = config.capture_height or profile[1]
+    return width, height
 
 
 def available_cameras(max_index: int) -> list[int]:
@@ -56,6 +67,8 @@ def run(config: AppConfig) -> int:
         raise ValueError("Dropout hold frames cannot be negative")
     if not 0 < config.max_quad_jump_fraction <= 1:
         raise ValueError("Maximum quad jump must be between 0 and 1")
+    if config.capture_width < 0 or config.capture_height < 0:
+        raise ValueError("Capture width and height cannot be negative")
 
     if config.list_cameras:
         cameras = available_cameras(config.max_camera_index)
@@ -75,7 +88,11 @@ def run(config: AppConfig) -> int:
         if not capture.isOpened():
             raise RuntimeError(f"Cannot open camera {config.camera_index}")
 
+        requested_width, requested_height = _capture_resolution(config)
         capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+        capture.set(cv2.CAP_PROP_FRAME_WIDTH, requested_width)
+        capture.set(cv2.CAP_PROP_FRAME_HEIGHT, requested_height)
         capture.set(cv2.CAP_PROP_FPS, config.requested_fps)
         ok, frame = capture.read()
         if not ok or frame is None:
@@ -86,6 +103,14 @@ def run(config: AppConfig) -> int:
         print(
             f"[INFO] {camera_kind} frame: {frame_width}x{frame_height}; "
             "image fit adjusts automatically."
+        )
+        mirror_status = "corrected" if (
+            config.mirror_mode == "on"
+            or (config.mirror_mode == "auto" and config.camera_index == 0)
+        ) else "off"
+        print(
+            f"[INFO] Requested {requested_width}x{requested_height}; "
+            f"rotation={config.rotation}, mirror correction={mirror_status}."
         )
 
         overlay = load_overlay(config.image_path, config.image_path.parent)

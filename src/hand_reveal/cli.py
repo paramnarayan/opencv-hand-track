@@ -19,6 +19,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model", type=Path, default=PROJECT_ROOT / "hand_landmarker.task")
     parser.add_argument("--camera", type=int, default=0)
     parser.add_argument("--rotate", choices=("none", "cw", "ccw", "180"), default="none")
+    parser.add_argument(
+        "--mirror",
+        choices=("auto", "on", "off"),
+        default="auto",
+        help="Mirror correction: auto flips camera 0 but leaves camera 1 unchanged.",
+    )
+    parser.add_argument(
+        "--width", type=int, default=0, help="Requested capture width; 0 uses camera profile."
+    )
+    parser.add_argument(
+        "--height", type=int, default=0, help="Requested capture height; 0 uses camera profile."
+    )
     parser.add_argument("--min-gap", type=float, default=80.0)
     parser.add_argument("--min-area", type=float, default=2_500.0)
     parser.add_argument("--image-size", type=float, default=0.50)
@@ -46,6 +58,9 @@ def main(argv: list[str] | None = None) -> int:
         model_path=args.model.expanduser().resolve(),
         camera_index=args.camera,
         rotation=args.rotate,
+        mirror_mode=args.mirror,
+        capture_width=args.width,
+        capture_height=args.height,
         min_gap=args.min_gap,
         min_quad_area=args.min_area,
         image_display_fraction=args.image_size,

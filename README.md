@@ -85,6 +85,9 @@ python main.py --camera 1
 --model PATH              MediaPipe task model
 --camera INDEX            Camera index
 --rotate {none,cw,ccw,180}
+--mirror {auto,on,off}    Camera-specific mirror correction
+--width PIXELS            Requested capture width; 0 uses camera profile
+--height PIXELS           Requested capture height; 0 uses camera profile
 --min-gap PIXELS          Minimum index-finger separation
 --min-area PIXELS         Minimum valid reveal polygon area
 --image-size FRACTION     Display size relative to the camera frame
@@ -107,6 +110,12 @@ Use an iPhone Continuity Camera commonly exposed as camera 1:
 python main.py --camera 1
 ```
 
+Camera 0 requests 1280x720 and receives mirror correction by default. Camera 1
+requests 1920x1080 and keeps the iPhone/virtual-camera orientation unchanged.
+The camera may return a lower resolution when its driver does not support the
+requested profile. Use `--mirror on`, `--mirror off`, or `--rotate` only when a
+specific camera driver needs an override.
+
 Use a custom image:
 
 ```bash
@@ -122,7 +131,7 @@ python main.py --rotate cw
 Image and model paths are resolved independently of the terminal's working
 directory. If the requested image cannot be read, the application searches the
 same directory for another supported image and finally generates a placeholder.
-The image uses 70% of the available frame by default while preserving its
+The image uses 50% of the available frame by default while preserving its
 original aspect ratio.
 
 ## Project structure
