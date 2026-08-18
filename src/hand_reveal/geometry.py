@@ -6,13 +6,13 @@ import numpy as np
 from .detector import HandPair
 
 
-def _stable_fingertip(
+def _projected_fingertip(
     hand: list[tuple[float, float]], tip_index: int, neighbor_index: int
 ) -> np.ndarray:
-    """Use the landmark next to a tip to reduce single-point tracking jitter."""
+    """Place the corner at the visible end of the finger, not inside the tip."""
     tip = np.asarray(hand[tip_index], dtype=np.float32)
     neighbor = np.asarray(hand[neighbor_index], dtype=np.float32)
-    return tip * 0.85 + neighbor * 0.15
+    return tip + (tip - neighbor) * 0.06
 
 
 def build_reveal_quad(
@@ -24,12 +24,13 @@ def build_reveal_quad(
     if len(screen_left) <= 8 or len(screen_right) <= 8:
         return None
 
-    # Blend each fingertip with the landmark immediately behind it. This keeps
-    # the corner near the visible tip while suppressing endpoint flicker.
-    left_index = _stable_fingertip(screen_left, 8, 7)
-    right_index = _stable_fingertip(screen_right, 8, 7)
-    right_thumb = _stable_fingertip(screen_right, 4, 3)
-    left_thumb = _stable_fingertip(screen_left, 4, 3)
+    # Use the adjacent joint to estimate the finger direction, then extend a
+    # few percent beyond MediaPipe's center-of-tip landmark to reach the
+    # visible endpoint seen in the camera image.
+    left_index = _projected_fingertip(screen_left, 8, 7)
+    right_index = _projected_fingertip(screen_right, 8, 7)
+    right_thumb = _projected_fingertip(screen_right, 4, 3)
+    left_thumb = _projected_fingertip(screen_left, 4, 3)
     points = np.asarray(
         [left_index, right_index, right_thumb, left_thumb], dtype=np.float32
     )
@@ -39,15 +40,10 @@ def build_reveal_quad(
     if float(np.linalg.norm(right_index - left_index)) <= min_gap:
         return None
 
-    hull = cv2.convexHull(points, clockwise=False).reshape(-1, 2)
-    if len(hull) != 4 or cv2.contourArea(hull) < min_area:
+    contour = points.astype(np.int32)
+    if not cv2.isContourConvex(contour) or abs(cv2.contourArea(points)) < min_area:
         return None
-
-    # Keep corner correspondence stable for the temporal smoother. OpenCV may
-    # choose a different first hull vertex as the hands move.
-    first_corner = int(np.argmin(hull[:, 0] + hull[:, 1]))
-    hull = np.roll(hull, -first_corner, axis=0)
-    return hull.astype(np.float32, copy=False)
+    return points
 
 
 def is_plausible_quad(
