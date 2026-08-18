@@ -81,6 +81,12 @@ def run(config: AppConfig) -> int:
         if not ok or frame is None:
             raise RuntimeError("Could not read the first frame from the camera")
         frame = transform_frame(frame, config)
+        frame_height, frame_width = frame.shape[:2]
+        camera_kind = "iPhone/secondary" if config.camera_index == 1 else "camera"
+        print(
+            f"[INFO] {camera_kind} frame: {frame_width}x{frame_height}; "
+            "image fit adjusts automatically."
+        )
 
         overlay = load_overlay(config.image_path, config.image_path.parent)
         projector = _create_projector(overlay, frame, config)

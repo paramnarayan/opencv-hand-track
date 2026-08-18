@@ -21,7 +21,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--rotate", choices=("none", "cw", "ccw", "180"), default="none")
     parser.add_argument("--min-gap", type=float, default=80.0)
     parser.add_argument("--min-area", type=float, default=2_500.0)
-    parser.add_argument("--image-size", type=float, default=0.80)
+    parser.add_argument("--image-size", type=float, default=0.50)
     parser.add_argument("--feather-radius", type=int, default=0)
     parser.add_argument("--min-cutoff", type=float, default=1.5)
     parser.add_argument("--beta", type=float, default=0.015)

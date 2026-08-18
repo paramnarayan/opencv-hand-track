@@ -6,6 +6,15 @@ import numpy as np
 from .detector import HandPair
 
 
+def _stable_fingertip(
+    hand: list[tuple[float, float]], tip_index: int, neighbor_index: int
+) -> np.ndarray:
+    """Use the landmark next to a tip to reduce single-point tracking jitter."""
+    tip = np.asarray(hand[tip_index], dtype=np.float32)
+    neighbor = np.asarray(hand[neighbor_index], dtype=np.float32)
+    return tip * 0.85 + neighbor * 0.15
+
+
 def build_reveal_quad(
     hands: HandPair,
     min_gap: float,
@@ -15,10 +24,12 @@ def build_reveal_quad(
     if len(screen_left) <= 8 or len(screen_right) <= 8:
         return None
 
-    left_index = np.asarray(screen_left[8], dtype=np.float32)
-    right_index = np.asarray(screen_right[8], dtype=np.float32)
-    right_thumb = np.asarray(screen_right[4], dtype=np.float32)
-    left_thumb = np.asarray(screen_left[4], dtype=np.float32)
+    # Blend each fingertip with the landmark immediately behind it. This keeps
+    # the corner near the visible tip while suppressing endpoint flicker.
+    left_index = _stable_fingertip(screen_left, 8, 7)
+    right_index = _stable_fingertip(screen_right, 8, 7)
+    right_thumb = _stable_fingertip(screen_right, 4, 3)
+    left_thumb = _stable_fingertip(screen_left, 4, 3)
     points = np.asarray(
         [left_index, right_index, right_thumb, left_thumb], dtype=np.float32
     )
