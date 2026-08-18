@@ -10,6 +10,7 @@ and thumbs control the reveal area.
 - One Euro Filter smoothing using a monotonic clock
 - Convex-area validation to reject collapsed or crossed hand shapes
 - Clean image reveal with no colored hand-polygon tint
+- Distinct colored edge guides for the top, right, bottom, and left sides
 - Short dropout holding and implausible-jump rejection for steadier tracking
 - Reduced-resolution detector input mapped back to the full camera frame
 - Reused render buffers to reduce per-frame memory allocation

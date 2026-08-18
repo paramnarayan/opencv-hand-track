@@ -7,6 +7,12 @@ import numpy as np
 
 
 SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+EDGE_COLORS_BGR = (
+    (80, 255, 80),    # top: green
+    (255, 120, 40),   # right: blue
+    (60, 60, 255),    # bottom: red
+    (0, 230, 255),    # left: cyan/yellow
+)
 
 
 def load_overlay(image_path: Path, search_directory: Path) -> np.ndarray:
@@ -68,6 +74,7 @@ class Projector:
 
         self.frame_width = frame_width
         self.frame_height = frame_height
+        self.edge_thickness = max(2, round(min(frame_width, frame_height) / 360))
 
         overlay_height, overlay_width = overlay.shape[:2]
         max_width = max(1, int(frame_width * image_display_fraction))
@@ -116,6 +123,20 @@ class Projector:
 
         print(f"[INFO] Projector ready: display size {display_width}x{display_height} px")
 
+    def _draw_edge_guides(self, frame: np.ndarray, quad: np.ndarray) -> None:
+        points = np.rint(quad).astype(np.int32)
+        for index, color in enumerate(EDGE_COLORS_BGR):
+            start = tuple(points[index])
+            end = tuple(points[(index + 1) % 4])
+            cv2.line(
+                frame,
+                start,
+                end,
+                color,
+                self.edge_thickness,
+                cv2.LINE_AA,
+            )
+
     def render(self, frame: np.ndarray, quad: np.ndarray) -> np.ndarray:
         self.quad_mask.fill(0)
         cv2.fillConvexPoly(self.quad_mask, quad.astype(np.int32), 255)
@@ -137,6 +158,7 @@ class Projector:
 
         if not self.feather_radius:
             cv2.copyTo(self.canvas_fixed, self.reveal_mask, frame)
+            self._draw_edge_guides(frame, quad)
             return frame
 
         x, y, width, height = cv2.boundingRect(quad.astype(np.int32))
@@ -155,4 +177,5 @@ class Projector:
         np.multiply(camera, 1.0 - alpha, out=camera_part)
         np.add(image_part, camera_part, out=image_part)
         np.copyto(camera, image_part, casting="unsafe")
+        self._draw_edge_guides(frame, quad)
         return frame
