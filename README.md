@@ -9,7 +9,9 @@ and thumbs control the reveal area.
 - MediaPipe Hand Landmarker with an optional CVZone fallback
 - One Euro Filter smoothing using a monotonic clock
 - Convex-area validation to reject collapsed or crossed hand shapes
-- Feathered image reveal and configurable orange tint
+- Clean image reveal with no colored hand-polygon tint
+- Short dropout holding and implausible-jump rejection for steadier tracking
+- Reduced-resolution detector input mapped back to the full camera frame
 - Reused render buffers to reduce per-frame memory allocation
 - Command-line configuration without editing source code
 - Automatic cleanup of cameras, windows, and detector resources
@@ -82,16 +84,16 @@ python main.py --camera 1
 --image PATH              Image to reveal
 --model PATH              MediaPipe task model
 --camera INDEX            Camera index
---flip-camera             Mirror the camera horizontally
---no-flip-camera          Disable mirroring (default)
 --rotate {none,cw,ccw,180}
 --min-gap PIXELS          Minimum index-finger separation
 --min-area PIXELS         Minimum valid reveal polygon area
 --image-size FRACTION     Display size relative to the camera frame
---orange-strength VALUE   Tint strength from 0 to 1
 --feather-radius PIXELS   Reveal-edge softness; 0 disables it
 --min-cutoff VALUE        One Euro Filter stationary smoothing
 --beta VALUE              One Euro Filter motion responsiveness
+--inference-size PIXELS   Maximum detector input dimension; 0 uses full size
+--dropout-hold FRAMES     Frames to retain the last reliable hand polygon
+--max-quad-jump FRACTION  Reject implausible one-frame tracking jumps
 --fps VALUE               Requested camera frame rate
 ```
 
@@ -102,13 +104,13 @@ Run `python main.py --help` for the complete list.
 Use an iPhone Continuity Camera commonly exposed as camera 1:
 
 ```bash
-python main.py --camera 1 --no-flip-camera
+python main.py --camera 1
 ```
 
-Mirror a built-in webcam and use a custom image:
+Use a custom image:
 
 ```bash
-python main.py --flip-camera --image path/to/photo.jpg
+python main.py --image path/to/photo.jpg
 ```
 
 Rotate a sideways camera feed:
@@ -146,7 +148,6 @@ is intentionally not run in CI.
 ## Troubleshooting
 
 - Use `--list-cameras` if the default camera cannot be opened.
-- Try `--flip-camera` if hand movement feels reversed.
 - Increase `--min-area` if accidental narrow shapes reveal the image.
 - Reduce `--feather-radius` or `--image-size` on slower hardware.
 - Verify that the model path points to a readable Hand Landmarker task file.

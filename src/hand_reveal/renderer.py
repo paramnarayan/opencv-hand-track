@@ -7,7 +7,6 @@ import numpy as np
 
 
 SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
-ORANGE_BGR = (10, 110, 255)
 
 
 def load_overlay(image_path: Path, search_directory: Path) -> np.ndarray:
@@ -60,19 +59,15 @@ class Projector:
         frame_width: int,
         frame_height: int,
         image_display_fraction: float,
-        orange_strength: float,
         feather_radius: int,
     ):
         if not 0 < image_display_fraction <= 1:
             raise ValueError("Image display fraction must be between 0 and 1")
-        if not 0 <= orange_strength <= 1:
-            raise ValueError("Orange strength must be between 0 and 1")
         if feather_radius < 0:
             raise ValueError("Feather radius cannot be negative")
 
         self.frame_width = frame_width
         self.frame_height = frame_height
-        self.orange_strength = orange_strength
 
         overlay_height, overlay_width = overlay.shape[:2]
         base = max(1, int(min(frame_width, frame_height) * image_display_fraction))
@@ -110,15 +105,8 @@ class Projector:
             self.image_mask[dest_y0:dest_y1, dest_x0:dest_x1] = 255
 
         shape = (frame_height, frame_width)
-        color_shape = (frame_height, frame_width, 3)
         self.quad_mask = np.zeros(shape, dtype=np.uint8)
         self.reveal_mask = np.zeros(shape, dtype=np.uint8)
-        self.image_weight = np.zeros(shape, dtype=np.float32)
-        self.camera_weight = np.ones(shape, dtype=np.float32)
-        self.orange_solid = np.full(color_shape, ORANGE_BGR, dtype=np.uint8)
-        self.orange_blended = np.zeros(color_shape, dtype=np.uint8)
-        self.tinted_frame = np.zeros(color_shape, dtype=np.uint8)
-        self.result = np.zeros(color_shape, dtype=np.uint8)
 
         self.feather_radius = feather_radius
         if feather_radius:
@@ -149,29 +137,24 @@ class Projector:
                 dst=self.reveal_mask,
             )
 
-        cv2.addWeighted(
-            frame,
-            1.0 - self.orange_strength,
-            self.orange_solid,
-            self.orange_strength,
-            0,
-            dst=self.orange_blended,
-        )
-        np.copyto(self.tinted_frame, frame)
-        cv2.copyTo(self.orange_blended, self.quad_mask, self.tinted_frame)
+        if not self.feather_radius:
+            cv2.copyTo(self.canvas_fixed, self.reveal_mask, frame)
+            return frame
 
-        cv2.multiply(
-            self.reveal_mask,
-            1.0 / 255.0,
-            dst=self.image_weight,
-            dtype=cv2.CV_32F,
-        )
-        np.subtract(1.0, self.image_weight, out=self.camera_weight)
-        cv2.blendLinear(
-            self.canvas_fixed,
-            self.tinted_frame,
-            self.image_weight,
-            self.camera_weight,
-            dst=self.result,
-        )
-        return self.result
+        x, y, width, height = cv2.boundingRect(quad.astype(np.int32))
+        padding = self.feather_radius * 2
+        x0 = max(0, x - padding)
+        y0 = max(0, y - padding)
+        x1 = min(self.frame_width, x + width + padding)
+        y1 = min(self.frame_height, y + height + padding)
+        mask = self.reveal_mask[y0:y1, x0:x1]
+        alpha = mask.astype(np.float32)[:, :, None] * (1.0 / 255.0)
+        camera = frame[y0:y1, x0:x1]
+        image = self.canvas_fixed[y0:y1, x0:x1]
+        image_part = np.empty_like(image, dtype=np.float32)
+        camera_part = np.empty_like(camera, dtype=np.float32)
+        np.multiply(image, alpha, out=image_part)
+        np.multiply(camera, 1.0 - alpha, out=camera_part)
+        np.add(image_part, camera_part, out=image_part)
+        np.copyto(camera, image_part, casting="unsafe")
+        return frame

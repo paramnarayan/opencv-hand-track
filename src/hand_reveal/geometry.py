@@ -37,3 +37,27 @@ def build_reveal_quad(
     first_corner = int(np.argmin(hull[:, 0] + hull[:, 1]))
     hull = np.roll(hull, -first_corner, axis=0)
     return hull.astype(np.float32, copy=False)
+
+
+def is_plausible_quad(
+    quad: np.ndarray,
+    previous: np.ndarray | None,
+    frame_width: int,
+    frame_height: int,
+    max_jump_fraction: float,
+) -> bool:
+    """Reject one-frame landmark explosions without blocking normal hand motion."""
+    if previous is None:
+        return True
+
+    diagonal = float(np.hypot(frame_width, frame_height))
+    center_jump = float(np.linalg.norm(quad.mean(axis=0) - previous.mean(axis=0)))
+    if center_jump > diagonal * max_jump_fraction:
+        return False
+
+    area = abs(float(cv2.contourArea(quad)))
+    previous_area = abs(float(cv2.contourArea(previous)))
+    if previous_area <= 1.0:
+        return True
+    area_ratio = area / previous_area
+    return 0.2 <= area_ratio <= 5.0

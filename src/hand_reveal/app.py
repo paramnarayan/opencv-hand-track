@@ -7,7 +7,7 @@ import cv2
 from .config import AppConfig
 from .detector import HandTracker, create_hand_tracker
 from .filters import OneEuroFilter
-from .geometry import build_reveal_quad
+from .geometry import build_reveal_quad, is_plausible_quad
 from .renderer import Projector, load_overlay
 
 
@@ -23,8 +23,6 @@ def transform_frame(frame, config: AppConfig):
     rotation = ROTATIONS[config.rotation]
     if rotation is not None:
         frame = cv2.rotate(frame, rotation)
-    if config.flip_camera:
-        frame = cv2.flip(frame, 1)
     return frame
 
 
@@ -47,12 +45,16 @@ def _create_projector(overlay, frame, config: AppConfig) -> Projector:
         frame_width,
         frame_height,
         config.image_display_fraction,
-        config.orange_strength,
         config.feather_radius,
     )
 
 
 def run(config: AppConfig) -> int:
+    if config.dropout_hold_frames < 0:
+        raise ValueError("Dropout hold frames cannot be negative")
+    if not 0 < config.max_quad_jump_fraction <= 1:
+        raise ValueError("Maximum quad jump must be between 0 and 1")
+
     if config.list_cameras:
         cameras = available_cameras(config.max_camera_index)
         if cameras:
@@ -80,7 +82,7 @@ def run(config: AppConfig) -> int:
 
         overlay = load_overlay(config.image_path, config.image_path.parent)
         projector = _create_projector(overlay, frame, config)
-        tracker = create_hand_tracker(config.model_path)
+        tracker = create_hand_tracker(config.model_path, config.inference_max_dimension)
         print(f"[INFO] Detector: {tracker.name}")
 
         smoother = OneEuroFilter(
@@ -95,6 +97,9 @@ def run(config: AppConfig) -> int:
         read_failures = 0
         detection_error_last_reported = 0.0
         first_frame = True
+        last_raw_quad = None
+        last_smoothed_quad = None
+        missed_quad_frames = 0
         print("Controls: Q or ESC quits.")
 
         while True:
@@ -130,11 +135,28 @@ def run(config: AppConfig) -> int:
                 if hands is not None
                 else None
             )
-            if quad is not None:
-                smoothed_quad = smoother.smooth(quad)
-                frame = projector.render(frame, smoothed_quad)
+            if quad is not None and is_plausible_quad(
+                quad,
+                last_raw_quad,
+                projector.frame_width,
+                projector.frame_height,
+                config.max_quad_jump_fraction,
+            ):
+                last_raw_quad = quad
+                last_smoothed_quad = smoother.smooth(quad, video_timestamp_ms / 1000.0)
+                missed_quad_frames = 0
+                frame = projector.render(frame, last_smoothed_quad)
+            elif (
+                last_smoothed_quad is not None
+                and missed_quad_frames < config.dropout_hold_frames
+            ):
+                missed_quad_frames += 1
+                frame = projector.render(frame, last_smoothed_quad)
             else:
                 smoother.reset()
+                last_raw_quad = None
+                last_smoothed_quad = None
+                missed_quad_frames = 0
 
             fps_count += 1
             now = time.monotonic()
