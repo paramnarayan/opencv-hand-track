@@ -122,6 +122,8 @@ python main.py --rotate cw
 Image and model paths are resolved independently of the terminal's working
 directory. If the requested image cannot be read, the application searches the
 same directory for another supported image and finally generates a placeholder.
+The image uses 80% of the available frame by default while preserving its
+original aspect ratio.
 
 ## Project structure
 

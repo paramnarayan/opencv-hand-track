@@ -23,7 +23,9 @@ def transform_frame(frame, config: AppConfig):
     rotation = ROTATIONS[config.rotation]
     if rotation is not None:
         frame = cv2.rotate(frame, rotation)
-    return frame
+    # This camera backend supplies mirrored frames. Flip once so the displayed
+    # view has normal, non-mirrored orientation.
+    return cv2.flip(frame, 1)
 
 
 def available_cameras(max_index: int) -> list[int]:

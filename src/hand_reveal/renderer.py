@@ -70,13 +70,11 @@ class Projector:
         self.frame_height = frame_height
 
         overlay_height, overlay_width = overlay.shape[:2]
-        base = max(1, int(min(frame_width, frame_height) * image_display_fraction))
-        if overlay_width >= overlay_height:
-            display_width = base
-            display_height = max(1, int(base * overlay_height / overlay_width))
-        else:
-            display_height = base
-            display_width = max(1, int(base * overlay_width / overlay_height))
+        max_width = max(1, int(frame_width * image_display_fraction))
+        max_height = max(1, int(frame_height * image_display_fraction))
+        scale = min(max_width / overlay_width, max_height / overlay_height)
+        display_width = max(1, round(overlay_width * scale))
+        display_height = max(1, round(overlay_height * scale))
 
         resized = cv2.resize(
             overlay, (display_width, display_height), interpolation=cv2.INTER_AREA
